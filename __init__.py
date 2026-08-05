@@ -16,6 +16,11 @@ class ItchIoPlugin:
 
     def on_startup(self):
         try:
+            from .itch_io import migrate_legacy_install_dir
+            migrate_legacy_install_dir()
+        except Exception as e:
+            log.warning(f'itch.io legacy install dir migration failed: {e}')
+        try:
             from .itch_io import sync_install_status, start_install_watcher
             sync_install_status()
             start_install_watcher()
@@ -138,6 +143,18 @@ class ItchIoPlugin:
                             {'type': 'status_output', 'key': 'main'},
                         ],
                     },
+                },
+                {
+                    'title': 'Games Folder',
+                    'items': [
+                        {'type': 'text', 'content': 'Where PlayDate installs itch.io games.'},
+                        {'type': 'info_endpoint', 'endpoint': '/api/itch_io/games-dir-info'},
+                        {'type': 'buttons', 'items': [
+                            {'label': 'Set Folder…', 'action': {'type': 'call', 'fn': 'itchIoPickFolder'}},
+                            {'label': 'Open Folder', 'action': {'type': 'call', 'fn': 'itchIoOpenFolder'}},
+                        ]},
+                        {'type': 'status_output', 'key': 'folder'},
+                    ],
                 },
             ],
         }

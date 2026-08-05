@@ -190,3 +190,60 @@ if (_itchInstallCancelBtn) {
         await fetch(`/api/itch_io/install/${_itchInstallAppid}/cancel`, { method: 'POST' });
     });
 }
+
+// ── Games folder ─────────────────────────────────────────────────────────────
+
+var _itchIoFolderBusy = false;
+
+function itchIoPickFolder() {
+    if (_itchIoFolderBusy) return;
+    _itchIoFolderBusy = true;
+    setTimeout(function() { _itchIoFolderBusy = false; }, 300);
+    var statusEl = document.getElementById('itch_io-manage-status-folder');
+
+    function _pick() {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder) {
+            return window.pywebview.api.pick_folder();
+        }
+        return Promise.resolve(null);
+    }
+
+    _pick().then(function(path) {
+        if (!path) return;
+        if (statusEl) statusEl.textContent = 'Saving…';
+        fetch('/api/itch_io/games-dir', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({path: path}),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.error) {
+                if (statusEl) statusEl.textContent = 'Error: ' + d.error;
+                return;
+            }
+            if (statusEl) statusEl.textContent = '';
+            _itchIoRefreshFolderInfo();
+        })
+        .catch(function(e) {
+            if (statusEl) statusEl.textContent = 'Error: ' + e.message;
+        });
+    });
+}
+
+function itchIoOpenFolder() {
+    fetch('/api/itch_io/open-folder', { method: 'POST' }).catch(function() {});
+}
+
+function _itchIoRefreshFolderInfo() {
+    fetch('/api/itch_io/games-dir-info')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            var el = document.getElementById('itch_io-manage-info-0');
+            if (el) el.textContent = d.text || '';
+        })
+        .catch(function() {});
+}
+
+if (!_manageOnOpen['itch_io']) _manageOnOpen['itch_io'] = [];
+_manageOnOpen['itch_io'].push(_itchIoRefreshFolderInfo);

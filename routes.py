@@ -158,3 +158,13 @@ def scrape_single(appid):
     if data_out.get('release_date'):
         data_out['release_date'] = ts_to_date(data_out['release_date']) or ''
     return jsonify({'status': 'success', 'data': data_out})
+
+
+def _on_games_dir_change(path):
+    from .itch_io import start_install_watcher
+    start_install_watcher(path)
+
+
+from runners.installdir import register_install_dir_routes
+from .itch_io import ITCH_INSTALL_BASE
+register_install_dir_routes(bp, 'itch_io', ITCH_INSTALL_BASE, on_change=_on_games_dir_change)

@@ -498,11 +498,14 @@ def sync_install_status():
 _itch_watcher_observer = None
 
 
-def start_install_watcher():
-    """Watch ITCH_INSTALL_BASE for directory changes and sync install status."""
+def start_install_watcher(base_dir=None):
+    """Watch base_dir (default: the configured install dir) for directory
+    changes and sync install status."""
     global _itch_watcher_observer
 
-    os.makedirs(ITCH_INSTALL_BASE, exist_ok=True)
+    from runners.installdir import get_install_dir
+    base_dir = base_dir or get_install_dir('itch_io', ITCH_INSTALL_BASE)
+    os.makedirs(base_dir, exist_ok=True)
 
     try:
         from watchdog.observers import Observer
@@ -513,7 +516,7 @@ def start_install_watcher():
 
     class _InstallHandler(FileSystemEventHandler):
         def _on_change(self, path):
-            if os.path.dirname(os.path.abspath(path)) == os.path.abspath(ITCH_INSTALL_BASE):
+            if os.path.dirname(os.path.abspath(path)) == os.path.abspath(base_dir):
                 log.info('itch.io: install dir change detected — syncing install status')
                 try:
                     sync_install_status()
@@ -535,10 +538,10 @@ def start_install_watcher():
     stop_install_watcher()
 
     observer = Observer()
-    observer.schedule(_InstallHandler(), path=ITCH_INSTALL_BASE, recursive=False)
+    observer.schedule(_InstallHandler(), path=base_dir, recursive=False)
     observer.start()
     _itch_watcher_observer = observer
-    log.info(f'itch.io: install watcher started on {ITCH_INSTALL_BASE}')
+    log.info(f'itch.io: install watcher started on {base_dir}')
     return observer
 
 
@@ -612,12 +615,66 @@ import re as _re
 import zipfile
 import tarfile
 
+_OLD_ITCH_INSTALL_BASE = os.path.expanduser('~/.local/share/playdate-itch')  # Linux default before 2026-08-05
+
 if sys.platform == 'win32':
     ITCH_INSTALL_BASE = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'PlayDate', 'itch')
 elif sys.platform == 'darwin':
     ITCH_INSTALL_BASE = os.path.expanduser('~/Library/Application Support/PlayDate/itch')
 else:
-    ITCH_INSTALL_BASE = os.path.expanduser('~/.local/share/playdate-itch')
+    ITCH_INSTALL_BASE = os.path.expanduser('~/Games/itch')
+
+
+def migrate_legacy_install_dir():
+    """
+    One-time migration: itch.io's Linux default moved from
+    ~/.local/share/playdate-itch to ~/Games/itch (2026-08-05), matching
+    the convention GOG/Humble/IndieGala already use. Moves any existing
+    installs from the old path into the new default and updates each
+    affected game's install_path in the DB. No-ops if the user has
+    already configured an explicit override, or if there's nothing at
+    the old path to move.
+    """
+    if sys.platform != 'linux':
+        return
+    from runners.installdir import get_install_dir
+    if get_install_dir('itch_io', ITCH_INSTALL_BASE) != ITCH_INSTALL_BASE:
+        return  # explicit override already configured -- nothing to migrate
+    if _OLD_ITCH_INSTALL_BASE == ITCH_INSTALL_BASE or not os.path.isdir(_OLD_ITCH_INSTALL_BASE):
+        return
+    try:
+        entries = os.listdir(_OLD_ITCH_INSTALL_BASE)
+    except OSError:
+        return
+    if not entries:
+        return
+
+    import shutil
+    from database import get_db
+    os.makedirs(ITCH_INSTALL_BASE, exist_ok=True)
+    db    = get_db()
+    moved = 0
+    try:
+        for entry in entries:
+            old_path = os.path.join(_OLD_ITCH_INSTALL_BASE, entry)
+            new_path = os.path.join(ITCH_INSTALL_BASE, entry)
+            if not os.path.isdir(old_path) or os.path.exists(new_path):
+                continue
+            shutil.move(old_path, new_path)
+            db.execute(
+                "UPDATE games SET install_path = ? WHERE platform = 'itch_io' AND install_path = ?",
+                (new_path, old_path),
+            )
+            moved += 1
+        db.commit()
+    finally:
+        db.close()
+    if moved:
+        log.info(f'itch.io: migrated {moved} install(s) from {_OLD_ITCH_INSTALL_BASE!r} to {ITCH_INSTALL_BASE!r}')
+    try:
+        os.rmdir(_OLD_ITCH_INSTALL_BASE)
+    except OSError:
+        pass  # not empty (unexpected leftover files) -- harmless, leave it
 
 _install_states  = {}
 _install_lock    = threading.Lock()
@@ -800,9 +857,14 @@ def install_game(appid, progress_cb=None, cancel_ev=None):
     if not download_url:
         return {'status': 'error', 'message': 'Empty download URL returned'}
 
+    from runners.installdir import get_install_dir, check_writable
     safe_name    = _re.sub(r'[^\w-]', '_', game_name).strip('_')
-    install_path = os.path.join(ITCH_INSTALL_BASE, f'{safe_name}_{game_id}')
-    os.makedirs(install_path, exist_ok=True)
+    install_path = os.path.join(get_install_dir('itch_io', ITCH_INSTALL_BASE), f'{safe_name}_{game_id}')
+
+    try:
+        check_writable(install_path)
+    except RuntimeError as e:
+        return {'status': 'error', 'message': str(e)}
 
     filename = upload.get('filename', 'game.zip')
     tmp_path = os.path.join(install_path, f'_dl_{filename}')
@@ -812,6 +874,11 @@ def install_game(appid, progress_cb=None, cancel_ev=None):
         r = _session.get(download_url, stream=True, timeout=60)
         r.raise_for_status()
         total = int(r.headers.get('content-length', 0))
+        if total:
+            from runners.diskspace import check_disk_space
+            # Archive formats need roughly another `total` bytes of headroom
+            # to extract into alongside the still-present downloaded file.
+            check_disk_space(install_path, total * 2)
         done  = 0
         with open(tmp_path, 'wb') as fh:
             for chunk in r.iter_content(65536):
