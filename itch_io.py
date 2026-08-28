@@ -1235,3 +1235,107 @@ def fetch_description(platform_id):
     except Exception:
         pass
     return None
+
+
+# ── Store-page metadata (genre / tags / release date) ──────────────────────────
+# The itch.io API exposes none of the taxonomy shown on a game page, so for
+# itch exclusives (no Steam / PCGamingWiki match) the HTML page is the only
+# source. Called by metadata.backfill_metadata() as its last fallback tier.
+
+_tag_allowlist_cache = None
+
+
+def _tag_key(t):
+    return _re.sub(r'[^a-z0-9]+', ' ', (t or '').lower()).strip()
+
+
+def _itch_tag_allowlist():
+    """{normalised_key: canonical_tag} for every tag already in the library.
+    An itch tag is only kept if it maps to one -- keeps the tag vocabulary
+    consistent instead of curating a denylist of itch cruft. Punctuation is
+    flattened both sides so 'First-Person'/'First Person' match, and the
+    canonical spelling prefers a mixed-case, most-common form (so a one-off
+    'RELAXING' doesn't win over 'Relaxing')."""
+    global _tag_allowlist_cache
+    if _tag_allowlist_cache is None:
+        from collections import Counter
+        seen = {}
+        db = get_db()
+        try:
+            for (tagstr,) in db.execute(
+                "SELECT tags FROM games WHERE tags IS NOT NULL AND tags != ''"):
+                for t in (tagstr or '').split(','):
+                    t = t.strip()
+                    if t:
+                        seen.setdefault(_tag_key(t), []).append(t)
+        finally:
+            db.close()
+        out = {}
+        for key, casings in seen.items():
+            mixed = [c for c in casings if not c.isupper() and not c.islower()]
+            out[key] = Counter(mixed or casings).most_common(1)[0][0]
+        _tag_allowlist_cache = out
+    return _tag_allowlist_cache
+
+
+def _parse_page_date(s):
+    s = (s or '').strip()
+    for fmt in ('%b %d, %Y', '%B %d, %Y', '%b %Y', '%B %Y', '%Y'):
+        try:
+            return int(datetime.strptime(s, fmt).replace(tzinfo=timezone.utc).timestamp())
+        except ValueError:
+            continue
+    return None
+
+
+def store_page_metadata(url):
+    """Scrape genre / tags / release date from an itch.io game page.
+    Returns a dict for update_game_data (subset of genres/tags/release_date),
+    or {} on any failure. Tags are filtered to the library's existing
+    vocabulary; the genre (a small curated itch list) is kept as-is."""
+    if not url or 'itch.io/' not in url:
+        return {}
+    try:
+        from bs4 import BeautifulSoup
+        r = _session.get(url, timeout=15)
+        if not r.ok:
+            return {}
+        soup = BeautifulSoup(r.text, 'html.parser')
+    except Exception as e:
+        log.warning(f'itch store_page_metadata {url}: {e}')
+        return {}
+
+    panel = soup.select_one('.game_info_panel_widget')
+    if not panel:
+        return {}
+
+    rows = {}
+    for tr in panel.select('tr'):
+        cells = tr.select('td')
+        if len(cells) == 2:
+            links = [a.get_text(strip=True) for a in cells[1].select('a')]
+            rows[cells[0].get_text(strip=True).lower()] = (links, cells[1].get_text(strip=True))
+
+    out = {}
+
+    genre_links = rows.get('genre', ([], ''))[0]
+    if genre_links:
+        out['genres'] = ','.join(g.strip() for g in genre_links if g.strip())
+
+    tag_links = rows.get('tags', ([], ''))[0]
+    if tag_links:
+        allow = _itch_tag_allowlist()
+        kept = []
+        for t in tag_links:
+            canon = allow.get(_tag_key(t))
+            if canon and canon not in kept:
+                kept.append(canon)
+        if kept:
+            out['tags'] = ','.join(kept)
+
+    if 'release date' in rows:
+        ts = _parse_page_date(rows['release date'][1])
+        if ts:
+            out['release_date'] = ts
+
+    return out

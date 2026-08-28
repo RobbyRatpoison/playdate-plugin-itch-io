@@ -1,12 +1,12 @@
 {
-    "id": "itch_io",
-    "name": "itch.io",
-    "version": "1.0.1",
-    "min_core_version": "1.7.3",
-    "platform": "itch_io",
-    "author": "RobbyRatpoison",
-    "source": "github:RobbyRatpoison/playdate-plugin-itch-io",
-    "launcher": {
-        "required": false
-    }
+  "id": "itch_io",
+  "name": "itch.io",
+  "version": "1.0.2",
+  "min_core_version": "1.7.3",
+  "platform": "itch_io",
+  "author": "RobbyRatpoison",
+  "source": "github:RobbyRatpoison/playdate-plugin-itch-io",
+  "launcher": {
+    "required": false
+  }
 }

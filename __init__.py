@@ -59,6 +59,10 @@ class ItchIoPlugin:
         from .itch_io import fetch_description
         return fetch_description(platform_id)
 
+    def store_page_metadata(self, url):
+        from .itch_io import store_page_metadata
+        return store_page_metadata(url)
+
     def on_uninstall(self):
         from .itch_io import disconnect
         disconnect()
