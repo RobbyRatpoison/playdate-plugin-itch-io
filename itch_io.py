@@ -258,9 +258,17 @@ def _do_sync():
             ).fetchall()
         }
 
-        new_entries = [e for e in games
-                       if str(e['game']['id']) not in existing
-                       and str(e['game']['id']) not in blacklisted]
+        # De-dupe by game id: itch's owned-keys API returns one entry per
+        # download key, so a game claimed in two bundles comes back twice with
+        # the same game.id. `seen` guards against adding it more than once in a
+        # single run (the `existing` check only covers rows already in the DB).
+        new_entries, seen = [], set()
+        for e in games:
+            gid = str(e['game']['id'])
+            if gid in existing or gid in blacklisted or gid in seen:
+                continue
+            seen.add(gid)
+            new_entries.append(e)
         total_new = len(new_entries)
         log.info(f'itch.io sync: {total_new} new games to process')
 
