@@ -755,83 +755,16 @@ def _pick_upload(uploads):
     return candidates[0] if candidates else None
 
 
-def _is_elf(path):
-    try:
-        with open(path, 'rb') as f:
-            return f.read(4) == b'\x7fELF'
-    except Exception:
-        return False
-
-
-def _is_macho(path):
-    try:
-        with open(path, 'rb') as f:
-            magic = f.read(4)
-            return magic in (b'\xfe\xed\xfa\xce', b'\xfe\xed\xfa\xcf',
-                             b'\xce\xfa\xed\xfe', b'\xcf\xfa\xed\xfe',
-                             b'\xca\xfe\xba\xbe')
-    except Exception:
-        return False
-
-
-def _find_itch_executable(install_path):
-    """Walk install_path and return a relative path to the best executable."""
-    is_windows = sys.platform == 'win32'
-    is_mac     = sys.platform == 'darwin'
-
-    # macOS: look for .app bundles at top level first
-    if is_mac:
-        for entry in os.listdir(install_path):
-            if entry.endswith('.app') and os.path.isdir(os.path.join(install_path, entry)):
-                return entry
-
-    SKIP_EXT = {'.txt', '.md', '.cfg', '.ini', '.conf', '.json', '.log',
-                '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.xml',
-                '.html', '.htm', '.css', '.js', '.py', '.bak', '.desktop',
-                '.so', '.dll', '.dylib', '.pdb'}
-
-    appimages, native, scripts, winexes = [], [], [], []
-
-    for root, dirs, files in os.walk(install_path):
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
-        for fname in files:
-            if fname.startswith('.'):
-                continue
-            fpath = os.path.join(root, fname)
-            rel   = os.path.relpath(fpath, install_path)
-            _, ext = os.path.splitext(fname)
-            ext = ext.lower()
-            if ext in SKIP_EXT:
-                continue
-            if ext == '.appimage':
-                appimages.append(rel)
-            elif ext in ('.x86_64', '.x86', '.amd64', '.arm64', '.linux'):
-                native.append(rel)
-            elif ext == '.sh' and not is_windows:
-                scripts.append(rel)
-            elif not ext and not is_windows and (_is_elf(fpath) or (is_mac and _is_macho(fpath))):
-                native.append(rel)
-            elif ext == '.exe':
-                winexes.append(rel)
-
-    _HELPER_EXE_NAMES = {
-        'unitycrashhandler64', 'unitycrashhandler32', 'unitycrashhandler',
-        'unityplayer',
-        'dxsetup', 'dxwebsetup',
-        'vcredist_x64', 'vcredist_x86', 'vc_redist.x64', 'vc_redist.x86',
-        'dotnetfx', 'dotnet',
-    }
-
-    def _exe_sort_key(p):
-        stem = os.path.splitext(os.path.basename(p))[0].lower()
-        return (p.count(os.sep), stem in _HELPER_EXE_NAMES, p)
-
-    for group in (appimages, native, scripts, winexes):
-        if group:
-            # Prefer shallower paths; within same depth, deprioritize known helper exes
-            return sorted(group, key=_exe_sort_key)[0]
-
-    return None
+def _find_itch_executable(install_path, want_candidates=False):
+    """Best-guess launchable file via the shared runners.native_exe scanner
+    (relative to install_path), or None. want_candidates=True also returns
+    the ambiguity flag and full candidate list for a picker UI, as
+    (path, ambiguous, candidates)."""
+    from runners.native_exe import pick_executable
+    picked = pick_executable(install_path)
+    if want_candidates:
+        return picked['path'], picked['ambiguous'], picked['candidates']
+    return picked['path']
 
 
 def install_game(appid, progress_cb=None, cancel_ev=None):
@@ -949,10 +882,13 @@ def install_game(appid, progress_cb=None, cancel_ev=None):
                 except Exception:
                     pass
 
-    platform_executable = _find_itch_executable(install_path)
+    platform_executable, ambiguous, candidates = _find_itch_executable(install_path, want_candidates=True)
     update_game_data(appid, install_path=install_path, installed=1,
                      platform_executable=platform_executable)
     log.info(f'itch.io install complete: {game_name!r} → {install_path} (exe: {platform_executable!r})')
+    if ambiguous:
+        return {'status': 'needs_executable_pick', 'appid': appid,
+                'install_path': install_path, 'candidates': candidates}
     return {'status': 'success', 'install_path': install_path,
             'platform_executable': platform_executable}
 

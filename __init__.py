@@ -77,6 +77,12 @@ class ItchIoPlugin:
             'sync_label':       'Sync itch.io Library',
             'uninstall_url':    '/api/itch_io/uninstall/{appid}',
             'uninstall_confirm': 'Uninstall this itch.io game?\n\nThis will delete the game files from disk.',
+            'executable_candidates_url': '/api/itch_io/executable-candidates/{appid}',
+            'set_executable_url':        '/api/itch_io/set-executable/{appid}',
+            'context_menu_items': [
+                {'label': 'Change Executable', 'icon': '🎯', 'action_type': 'call',
+                 'js_fn': '_itchChangeExecutable', 'visible_if': 'installed'},
+            ],
         }
 
     def manage_ui(self):

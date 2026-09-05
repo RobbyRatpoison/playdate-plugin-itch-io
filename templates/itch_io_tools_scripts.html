@@ -1,5 +1,9 @@
 // ── itch.io ─────────────────────────────────────────────────────────────────
 
+function _itchChangeExecutable(appid) {
+    if (typeof pickExecutableForGame === 'function') pickExecutableForGame('itch_io', appid, null);
+}
+
 let _itchSyncPollInterval = null;
 
 // ── Library sync ──────────────────────────────────────────────────────────────
@@ -155,6 +159,16 @@ function _startItchInstallPoller(appid) {
                         b.innerText        = `✔ ${d.name || 'Game'} installed`;
                         b.style.background = '';
                         b.style.color      = 'var(--accent-positive)';
+                    }
+                    setTimeout(() => { _resetItchInstallBtn(); location.reload(); }, 2000);
+                } else if (d.status === 'needs_executable_pick') {
+                    if (b) {
+                        b.innerText        = `${d.name || 'Game'} installed`;
+                        b.style.background = '';
+                        b.style.color      = 'var(--accent-positive)';
+                    }
+                    if (typeof pickExecutableForGame === 'function') {
+                        pickExecutableForGame('itch_io', appid, d.candidates);
                     }
                     setTimeout(() => { _resetItchInstallBtn(); location.reload(); }, 2000);
                 } else if (d.status === 'cancelled') {
