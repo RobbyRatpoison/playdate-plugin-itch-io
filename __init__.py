@@ -55,6 +55,14 @@ class ItchIoPlugin:
         from .itch_io import rescrape_game
         return rescrape_game(appid)
 
+    art_kinds = ('vertical', 'horizontal')   # one cover, used for both slots
+    # itch's own sync tries SteamGridDB first and its cover only to fill gaps; keep that.
+    art_default_order = ('sgdb', 'store', 'steam')
+
+    def art_urls(self, appid):
+        from .itch_io import art_urls
+        return art_urls(appid)
+
     def fetch_description(self, appid, platform_id):
         from .itch_io import fetch_description
         return fetch_description(platform_id)

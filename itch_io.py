@@ -1166,6 +1166,30 @@ def rescrape_game(appid):
     return result or None
 
 
+def art_urls(appid):
+    """itch.io's own cover for core's Artwork Sources "Store" option. itch has a
+    single cover image, which the sync uses for both slots, so it's offered for
+    both. {} when not connected or the game can't be fetched."""
+    key = _api_key()
+    if not key:
+        return {}
+    db  = get_db()
+    row = db.execute(
+        "SELECT platform_id FROM games WHERE appid = ? AND platform = 'itch_io'", (appid,)
+    ).fetchone()
+    db.close()
+    if not row or not row['platform_id']:
+        return {}
+    try:
+        r = _session.get(f'{ITCH_API}/{key}/game/{row["platform_id"]}', timeout=10)
+        game = (r.json().get('game') or {}) if r.ok else {}
+    except Exception as e:
+        log.warning(f'itch.io art_urls failed for {appid}: {e}')
+        return {}
+    cover = game.get('still_cover_url') or game.get('cover_url')
+    return {'vertical': cover, 'horizontal': cover} if cover else {}
+
+
 def fetch_description(platform_id):
     """Fetch game description from itch.io API."""
     key = _api_key()
