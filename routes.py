@@ -177,7 +177,19 @@ def scrape_single(appid):
     update_game_data(appid, **meta)
 
     from database import ts_to_date
+    # The purchase date too (an explicit sync of this one game, so overwriting is expected).
+    try:
+        from .itch_io import fetch_dates_for_appids
+        got = []
+        fetch_dates_for_appids([appid], lambda a, ts: got.append(ts))
+        if got and got[0]:
+            update_game_data(appid, date_added=got[0])
+            meta['date_added'] = got[0]
+    except Exception as e:
+        log.warning(f'itch.io scrape-single: purchase date for {appid} failed: {e}')
     data_out = dict(meta)
+    if data_out.get('date_added'):
+        data_out['date_added'] = ts_to_date(data_out['date_added']) or ''
     if data_out.get('release_date'):
         data_out['release_date'] = ts_to_date(data_out['release_date']) or ''
     return jsonify({'status': 'success', 'data': data_out})
