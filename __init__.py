@@ -43,6 +43,14 @@ class ItchIoPlugin:
         from .itch_io import start_library_sync
         return start_library_sync()
 
+    def sync_status(self):
+        """Outcome of the last library sync, for core's startup sync (see PLUGINS.md)."""
+        from .itch_io import get_sync_state
+        st = get_sync_state()
+        err = st.get('error')
+        return {'running': bool(st.get('running')), 'error': None if err == 'Not connected' else err,
+                'connected': err != 'Not connected'}
+
     def fetch_purchase_dates(self, appids, on_result):
         from .itch_io import fetch_dates_for_appids
         fetch_dates_for_appids(appids, on_result)
